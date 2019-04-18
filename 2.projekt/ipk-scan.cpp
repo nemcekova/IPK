@@ -26,6 +26,16 @@
 #define __FAVOR_BSD
 
 
+unsigned short csum (unsigned short *buf, int nwords){
+  unsigned long sum;
+  for (sum = 0; nwords > 0; nwords--)
+    sum += *buf++;
+  sum = (sum >> 16) + (sum & 0xffff);
+  sum += (sum >> 16);
+  return ~sum;
+}
+
+
 int main(int argc, char *argv[]){
     if(argc > 8 || argc == 7 || argc < 6){
         fprintf(stderr, "Incorrect number of arguments\n");
@@ -61,9 +71,10 @@ int main(int argc, char *argv[]){
                 exit(-1);
             }
             else{
-                tcp_port = argv[i+1];
+                tcp_port = argv[i+1];    
                 pt = true;
                 i +=2;
+                
                 continue;
             }
         }
@@ -231,8 +242,36 @@ int main(int argc, char *argv[]){
      iph->ip_src.s_addr = inet_addr("1.2.3.4"); //MODIFY !!!!!!!!!!!!!!!
      iph->ip_dst.s_addr = sin.sin_addr.s_addr;
      
+     tcph->th_sport = htons(1234); //MODIFY !!!!!!!!!!!!!
+     tcph->th_dport = htons(25);
+     tcph->th_seq = htonl(1);
+     tcph->th_ack = 0;
+     tcph->th_x2 = 0;
+     tcph->th_off = 0;
+     tcph->th_flags = TH_SYN;
+     tcph->th_win = htonl(32767); //maximum allowed windows size
+     tcph->th_sum = 0;
+     tcph->th_urp = 0;
+     
+     iph->ip_sum = csum((unsigned short*) buffer, iph->ip_len >> 1);
+     
+
+         if(sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin)) < 0){
+             printf("Error in sendto\n");
+         }
+         else printf("sendto OK\n");
 
 
+         /*UDP
+         struct udphdr *udph = (struct udphdr *)buffer + sizeof(struct ip);
+         udph->uh_sport =
+         udph->uh_dport =
+         udph->uh_ulen =
+         udph->uh_sum =
+         
+         
+         
+         */
 
 
 
