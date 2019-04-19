@@ -19,12 +19,41 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
+#include <netinet/ether.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <pcap.h>
 #include "header.h"
 #define __USE_BSD
 #define __FAVOR_BSD
+
+struct pseudoTCPpacket{
+  uint32_t srcAddr;
+  uint32_t dstAddr;
+  uint8_t zero;
+  uint8_t protocol;
+  uint16_t TCP_len;
+};
+
+void packetHandler(u_char *user, const struct pcap_pkthdr *h, const u_char *packet ){
+     /*ether_header *eth = packet;
+     iphdr *ip = packet + sizeof(ether_header);
+     tcphdr *tcp = ip + sizeof(iphdr);*/
+     const struct ether_header *eth;
+     const struct iphdr *ip;
+     const struct tcphdr *tcp;
+     const u_char *payload;
+     
+     int size_eth = sizeof(struct ether_header);
+     int size_ip = sizeof(struct iphdr);
+     int size_tcp = sizeof(struct tcphdr);
+     
+     eth = (struct ether_header *)(packet);
+     ip = (struct iphdr *)(packet + size_eth);
+     tcp = (struct tcphdr *)(packet + size_eth + size_ip);
+     payload = (u_char *)(packet + size_eth + size_ip + size_tcp);
+     printf("got packet\n");
+}
 
 
 unsigned short csum (unsigned short *buf, int nwords){
@@ -36,6 +65,28 @@ unsigned short csum (unsigned short *buf, int nwords){
   return ~sum;
 }
 
+unsigned short tcp_csum(unsigned short *buf,int size){
+    long sum;
+    unsigned long odd;
+    short answer;
+    
+    sum = 0;
+    while(size > 1){
+        sum+=*buf;
+        size -=2;
+    }
+    
+    if(size == 1){
+        odd = 0;
+        *((u_char*)&odd)=*(u_char*)buf;
+        sum+=odd;
+    }
+    
+    sum = (sum>>16) + (sum & 0xffff);
+    sum = sum + (sum >> 16);
+    answer = (short)~sum;
+    return(answer);
+}
 
 void ListInit(TList *l){
     l->act = NULL;
@@ -325,8 +376,19 @@ int main(int argc, char *argv[]){
      }
      else printf("pcap_activate OK\n");
      
+     struct bpf_program fcode;
      
-     
+    int comp = pcap_compile(my_pcap, &fcode, "tcp", 1, 0);
+    if (comp != 0){
+        pcap_perror(my_pcap, "Error");
+    }
+    else printf("pcap_compile OK\n");
+    int filter = pcap_setfilter(my_pcap, &fcode);
+    if(filter != 0){
+        pcap_perror(my_pcap, "error");
+    }
+    else printf("pcap_setfilter OK\n");
+        
      //////////////////////////////////////////////////////////////////////////////////////////
      //Creates a raw socket with UDP protocol
      
@@ -359,11 +421,15 @@ int main(int argc, char *argv[]){
      }
      else printf("setsockopt OK\n");
 
+
+
 /////////////////IP AND TCP HEADER///////////////////////////////////////////////
      char buffer[4096]; //packet lenght
      struct ip *iph = (struct ip *) buffer;
      struct tcphdr *tcph = (struct tcphdr *)buffer + sizeof(struct ip);
      struct sockaddr_in sin;
+     struct pseudoTCPpacket tcpPacket;
+     char *pseudo_packet;
      
      sin.sin_family = AF_INET;
      sin.sin_port = htons(25);
@@ -384,7 +450,10 @@ int main(int argc, char *argv[]){
      iph->ip_src.s_addr = inet_addr("1.2.3.4"); //MODIFY !!!!!!!!!!!!!!!
      iph->ip_dst.s_addr = sin.sin_addr.s_addr;
      
-     tcph->th_sport = htons(1234); //MODIFY !!!!!!!!!!!!!
+     iph->ip_sum = csum((unsigned short*) buffer, iph->ip_len >> 1);
+     
+     
+     tcph->th_sport = htons(80); //MODIFY !!!!!!!!!!!!!
      tcph->th_dport = htons(25);
      tcph->th_seq = htonl(1);
      tcph->th_ack = 0;
@@ -395,13 +464,27 @@ int main(int argc, char *argv[]){
      tcph->th_sum = 0;
      tcph->th_urp = 0;
      
-     iph->ip_sum = csum((unsigned short*) buffer, iph->ip_len >> 1);
-     
+    tcpPacket.srcAddr = inet_addr();
+    tcpPacket.dstAddr = inet_addr(); 
+    tcpPacket.zero = 0; 
+    tcpPacket.protocol = IPPROTO_TCP; 
+    tcpPacket.TCP_len = htons(sizeof(struct tcphdr) + strlen(data))
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
 
-         if(sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin)) < 0){
-             printf("Error in sendto\n");
-         }
-         else printf("sendto OK\n");
+    if(sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin)) < 0){
+         printf("Error in sendto\n");
+    }
+    else printf("sendto OK\n");
 
 
          /*UDP
@@ -410,10 +493,15 @@ int main(int argc, char *argv[]){
          udph->uh_dport =
          udph->uh_ulen =
          udph->uh_sum =
-         
-         
-         
          */
+    
+    
+    int loop = pcap_loop(my_pcap, 0, packetHandler, NULL);
+    /*struct pcap_pkthdr *h;
+    if(pcap_next (my_pcap, h) == NULL){
+        fprintf(stderr, "Error in pcap next\n");
+    }
+    else printf("pcap next OK\n");*/
 
 
 
