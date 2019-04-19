@@ -19,13 +19,15 @@
 #include <netinet/in.h>
 #include <netinet/ip.h>
 #include <netinet/tcp.h>
-#include <netinet/ether.h>
+#include <netinet/if_ether.h>
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <pcap.h>
 #include "header.h"
 #define __USE_BSD
 #define __FAVOR_BSD
+#define DATA "datastring"
+#define ETHER_ADDR_LEN 
 
 struct pseudoTCPpacket{
   uint32_t srcAddr;
@@ -33,6 +35,12 @@ struct pseudoTCPpacket{
   uint8_t zero;
   uint8_t protocol;
   uint16_t TCP_len;
+};
+
+struct sniff_ethernet {
+    u_char ether_dhost[ETHER_ADDR_LEN]; /* Destination host address */
+    u_char ether_shost[ETHER_ADDR_LEN]; /* Source host address */
+    u_short ether_type; /* IP? ARP? RARP? etc */
 };
 
 void packetHandler(u_char *user, const struct pcap_pkthdr *h, const u_char *packet ){
@@ -333,7 +341,7 @@ int main(int argc, char *argv[]){
 //////////////////////////////////////////////////////////////////////////////////////////
 //MY DEVICE
 
-    //ZMENIT PREMENNEEEEEEEEEEEEEE a zistit co to vlastne robi
+
     int socket_descriptor;
     struct ifreq ifr;
     
@@ -430,61 +438,65 @@ int main(int argc, char *argv[]){
      struct sockaddr_in sin;
      struct pseudoTCPpacket tcpPacket;
      char *pseudo_packet;
+     char *data;
      
      sin.sin_family = AF_INET;
      sin.sin_port = htons(25);
      
      
-     sin.sin_addr.s_addr = inet_addr(my_ip); //zmeni IP na binary data
+     sin.sin_addr.s_addr = inet_addr(host); //zmeni IP na binary data
      memset(buffer, 0, 4096);
+     data = (char *)(buffer + sizeof(struct iphdr) + sizeof(struct tcphdr));
+     strcpy(data, DATA);
      
      iph->ip_hl = 5;
      iph->ip_v = 4;
      iph->ip_tos = 0;
-     iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr);
+     iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr) + strlen(data);
      iph->ip_id = htons(54321);
      iph->ip_off = 0;
      iph->ip_ttl = 64;
      iph->ip_p = 6;
      iph->ip_sum = 0;
-     iph->ip_src.s_addr = inet_addr("1.2.3.4"); //MODIFY !!!!!!!!!!!!!!!
+     iph->ip_src.s_addr = inet_addr(my_ip); 
      iph->ip_dst.s_addr = sin.sin_addr.s_addr;
      
-     iph->ip_sum = csum((unsigned short*) buffer, iph->ip_len >> 1);
+     iph->ip_sum = tcp_csum((unsigned short*) buffer, iph->ip_len >> 1);
      
      
      tcph->th_sport = htons(80); //MODIFY !!!!!!!!!!!!!
      tcph->th_dport = htons(25);
      tcph->th_seq = htonl(1);
+     //tcph->doff = 5;
      tcph->th_ack = 0;
      tcph->th_x2 = 0;
-     tcph->th_off = 0;
+     //tcph->th_off = 5;
      tcph->th_flags = TH_SYN;
      tcph->th_win = htonl(32767); //maximum allowed windows size
      tcph->th_sum = 0;
      tcph->th_urp = 0;
      
-    tcpPacket.srcAddr = inet_addr();
-    tcpPacket.dstAddr = inet_addr(); 
+     
+    tcpPacket.srcAddr = inet_addr(my_ip);
+    tcpPacket.dstAddr = inet_addr(host); 
     tcpPacket.zero = 0; 
     tcpPacket.protocol = IPPROTO_TCP; 
-    tcpPacket.TCP_len = htons(sizeof(struct tcphdr) + strlen(data))
+    tcpPacket.TCP_len = htons(sizeof(struct tcphdr) + strlen(data));
     
+    pseudo_packet = (char *)malloc((int) (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data)));
+    memset(pseudo_packet, 0, sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data));
     
+    memcpy(pseudo_packet, (char *) &tcpPacket, sizeof(struct pseudoTCPpacket));
     
+    tcph->th_sum = tcp_csum((unsigned short *)pseudo_packet, (int) (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data)));
     
+    printf("TCP checksum: %d\n", tcph->th_sum);
     
-    
-    
-    
-    
-    
-    
-
-    if(sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin)) < 0){
+    int bytes;
+    if((bytes = sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin))) < 0){
          printf("Error in sendto\n");
     }
-    else printf("sendto OK\n");
+    else printf("sendto OK: %d bytes\n", bytes);
 
 
          /*UDP
@@ -496,7 +508,7 @@ int main(int argc, char *argv[]){
          */
     
     
-    int loop = pcap_loop(my_pcap, 0, packetHandler, NULL);
+    int loop = pcap_loop(my_pcap, -1, packetHandler, NULL);
     /*struct pcap_pkthdr *h;
     if(pcap_next (my_pcap, h) == NULL){
         fprintf(stderr, "Error in pcap next\n");
