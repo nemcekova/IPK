@@ -22,6 +22,7 @@
 #include <net/if.h>
 #include <arpa/inet.h>
 #include <pcap.h>
+#include "header.h"
 #define __USE_BSD
 #define __FAVOR_BSD
 
@@ -36,6 +37,38 @@ unsigned short csum (unsigned short *buf, int nwords){
 }
 
 
+void ListInit(TList *l){
+    l->act = NULL;
+    l->first = NULL;
+}
+
+void InsertFirst(TList *l, int num){
+    TElem *newElemPtr = (TElem *) malloc(sizeof(TElem));
+    if(newElemPtr == NULL){
+        fprintf(stderr, "Memory allocation error\n");
+        exit(-1);
+    }
+    newElemPtr->port_num = num;
+    newElemPtr->nextPtr = NULL;
+    l->first = newElemPtr;
+    l->act = newElemPtr;
+}
+
+void PostInsert(TList *l, int num){
+    if(l->act != NULL){
+        TElem *newElemPtr = (TElem *) malloc(sizeof(TElem));
+        if(newElemPtr == NULL){
+            fprintf(stderr, "Memory allocation error\n");
+            exit(-1);
+        }
+        newElemPtr->port_num = num;
+        newElemPtr->nextPtr = l->act->nextPtr;
+        l->act->nextPtr = newElemPtr;
+        l->act = newElemPtr;
+    }
+}
+
+
 int main(int argc, char *argv[]){
     if(argc > 8 || argc == 7 || argc < 6){
         fprintf(stderr, "Incorrect number of arguments\n");
@@ -46,8 +79,8 @@ int main(int argc, char *argv[]){
     bool intface = false;
     bool addr = false;
     
-    char* udp_port;
-    char* tcp_port;
+    char* u_port;
+    char* t_port;
     char* interface;
     char* address;
     
@@ -59,7 +92,62 @@ int main(int argc, char *argv[]){
                 exit(-1);
             }
             else{
-                udp_port = argv[i+1];
+                u_port = argv[i+1];
+                
+                bool dash_u = false;
+                int coun = 0;
+                for(int j=0; u_port[j]; j++){
+                    if(u_port[j] == ','){
+                        coun++;
+                    }
+                    else if(u_port[j] == '-'){
+                        dash_u = true;
+                        break;
+                    }
+                }
+                
+                TList *udp_ports = (TList *) malloc(sizeof(TList));
+                ListInit(udp_ports);
+                
+                if(coun > 0){
+                    
+                    int cnt_u = 0;
+                    char *ch = strtok(u_port, ",");
+                    int number_u = atoi(ch);
+                    InsertFirst(udp_ports, number_u);
+                    
+                    for(int j = 0; j<coun; j++){
+                        ch = strtok(NULL, ",");
+                        number_u = atoi(ch);
+                        PostInsert(udp_ports, number_u);
+                    }    
+                }
+                else if(dash_u == true){
+                    char *pp = strtok(u_port, "-");
+                    int n1 = atoi(pp);
+                    InsertFirst(udp_ports, n1);
+                    pp = strtok(NULL, "-");
+                    int n2 = atoi(pp);
+                    
+                    
+                    for(n1+=1; n1 <= n2; n1++){
+                        PostInsert(udp_ports, n1);
+                    }
+                }
+                else{
+                    int n = atoi(u_port);
+                    InsertFirst(udp_ports,n);
+                }
+                
+                
+                udp_ports->act = udp_ports->first;
+                while(udp_ports->act->nextPtr != NULL){
+                    printf("%d\n", udp_ports->act->port_num);
+                    udp_ports->act = udp_ports->act->nextPtr;
+                }
+                printf("%d\n", udp_ports->act->port_num);
+                
+                
                 pu = true;
                 i += 2;
                 continue;
@@ -71,7 +159,60 @@ int main(int argc, char *argv[]){
                 exit(-1);
             }
             else{
-                tcp_port = argv[i+1];    
+                t_port = argv[i+1];    
+                bool dash = false;
+                int count = 0;
+                for(int j=0; t_port[j]; j++){
+                    if(t_port[j] == ','){
+                        count++;
+                    }
+                    else if(t_port[j] == '-'){
+                        dash = true;
+                        break;
+                    }
+                }
+                
+                TList *tcp_ports = (TList *) malloc(sizeof(TList));
+                ListInit(tcp_ports);
+                
+                if(count > 0){
+                    
+                    int cnt = 0;
+                    char *c = strtok(t_port, ",");
+                    int number = atoi(c);
+                    InsertFirst(tcp_ports, number);
+                    
+                    for(int j = 0; j<count; j++){
+                        c = strtok(NULL, ",");
+                        number = atoi(c);
+                        PostInsert(tcp_ports, number);
+                    }    
+                }
+                else if(dash == true){
+                    char *p = strtok(t_port, "-");
+                    int num1 = atoi(p);
+                    InsertFirst(tcp_ports, num1);
+                    p = strtok(NULL, "-");
+                    int num2 = atoi(p);
+                    
+                    
+                    for(num1+=1; num1 <= num2; num1++){
+                        PostInsert(tcp_ports, num1);
+                    }
+                }
+                else{
+                    int num = atoi(t_port);
+                    InsertFirst(tcp_ports,num);
+                }
+                
+                
+                tcp_ports->act = tcp_ports->first;
+                while(tcp_ports->act->nextPtr != NULL){
+                    printf("%d\n", tcp_ports->act->port_num);
+                    tcp_ports->act = tcp_ports->act->nextPtr;
+                }
+                printf("%d\n", tcp_ports->act->port_num);
+                
                 pt = true;
                 i +=2;
                 
@@ -164,6 +305,7 @@ int main(int argc, char *argv[]){
      
      char err_lookup[PCAP_ERRBUF_SIZE];
      char *dev = pcap_lookupdev(err_lookup);
+     
      if(dev == NULL){
          fprintf(stderr, "Error in pcap_lookupdev: %s\n", err_lookup);
          exit(-1);
