@@ -80,7 +80,7 @@ unsigned short tcp_csum(unsigned short *buf,int size){
     
     sum = 0;
     while(size > 1){
-        sum+=*buf;
+        sum+=*buf++;
         size -=2;
     }
     
@@ -433,8 +433,9 @@ int main(int argc, char *argv[]){
 
 /////////////////IP AND TCP HEADER///////////////////////////////////////////////
      char buffer[4096]; //packet lenght
-     struct ip *iph = (struct ip *) buffer;
-     struct tcphdr *tcph = (struct tcphdr *)buffer + sizeof(struct ip);
+     memset(buffer, 0, sizeof(buffer));
+     struct iphdr *iph = (struct iphdr *)( buffer);
+     struct tcphdr *tcph = (struct tcphdr *)(buffer + sizeof(struct ip));
      struct sockaddr_in sin;
      struct pseudoTCPpacket tcpPacket;
      char *pseudo_packet;
@@ -445,36 +446,44 @@ int main(int argc, char *argv[]){
      
      
      sin.sin_addr.s_addr = inet_addr(host); //zmeni IP na binary data
-     memset(buffer, 0, 4096);
      data = (char *)(buffer + sizeof(struct iphdr) + sizeof(struct tcphdr));
      strcpy(data, DATA);
      
-     iph->ip_hl = 5;
-     iph->ip_v = 4;
-     iph->ip_tos = 0;
-     iph->ip_len = sizeof(struct ip) + sizeof(struct tcphdr) + strlen(data);
-     iph->ip_id = htons(54321);
-     iph->ip_off = 0;
-     iph->ip_ttl = 64;
-     iph->ip_p = 6;
-     iph->ip_sum = 0;
-     iph->ip_src.s_addr = inet_addr(my_ip); 
-     iph->ip_dst.s_addr = sin.sin_addr.s_addr;
+    
+     iph->ihl = 5; //5 x 32-bit words in the header
+     iph->version = 4; // ipv4
+     iph->tos = 0;// //tos = [0:5] DSCP + [5:7] Not used, low delay
+     iph->tot_len = sizeof(struct iphdr) + sizeof(struct tcphdr) + strlen(data); //total lenght of packet. len(data) = 0
+     iph->id = htons(54321); // 0x00; //16 bit id
+     iph->frag_off = 0x00; //16 bit field = [0:2] flags + [3:15] offset = 0x0
+     iph->ttl = 0xFF; //16 bit time to live (or maximal number of hops)
+     iph->protocol = IPPROTO_TCP; //TCP protocol
+     iph->check = 0; //16 bit checksum of IP header. Can't calculate at this point
+     iph->saddr = inet_addr(my_ip); //32 bit format of source address
+     iph->daddr = inet_addr(host); //32 bit format of source address
      
-     iph->ip_sum = tcp_csum((unsigned short*) buffer, iph->ip_len >> 1);
+     iph->check = tcp_csum((unsigned short*) buffer, iph->tot_len );
      
      
-     tcph->th_sport = htons(80); //MODIFY !!!!!!!!!!!!!
-     tcph->th_dport = htons(25);
-     tcph->th_seq = htonl(1);
-     //tcph->doff = 5;
-     tcph->th_ack = 0;
-     tcph->th_x2 = 0;
-     //tcph->th_off = 5;
-     tcph->th_flags = TH_SYN;
-     tcph->th_win = htonl(32767); //maximum allowed windows size
-     tcph->th_sum = 0;
-     tcph->th_urp = 0;
+
+     
+      tcph->source = htons(25); //16 bit in nbp format of source port
+      tcph->dest = htons(80); //16 bit in nbp format of destination port
+      tcph->seq = 0x0; //32 bit sequence number, initially set to zero
+      tcph->ack_seq = 0x0; //32 bit ack sequence number, depends whether ACK is set or not
+      tcph->doff = 5; //4 bits: 5 x 32-bit words on tcp header
+      tcph->res1 = 0; //4 bits: Not used
+      tcph->urg = 0; //Urgent flag
+      tcph->ack = 0; //Acknownledge
+      tcph->psh = 0; //Push data immediately
+      tcph->rst = 0; //RST flag
+      tcph->syn = 1; //SYN flag
+      tcph->fin = 0; //Terminates the connection
+      tcph->window = htons(155);//0xFFFF; //16 bit max number of databytes 
+      tcph->check = 0; //16 bit check sum. Can't calculate at this point
+      tcph->urg_ptr = 0; //16 bit indicate the urgent data. Only if URG flag is set
+
+      
      
      
     tcpPacket.srcAddr = inet_addr(my_ip);
@@ -483,18 +492,21 @@ int main(int argc, char *argv[]){
     tcpPacket.protocol = IPPROTO_TCP; 
     tcpPacket.TCP_len = htons(sizeof(struct tcphdr) + strlen(data));
     
-    pseudo_packet = (char *)malloc((int) (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data)));
-    memset(pseudo_packet, 0, sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data));
+    int psize = (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data));
+    pseudo_packet = (char *)malloc(psize);
     
     memcpy(pseudo_packet, (char *) &tcpPacket, sizeof(struct pseudoTCPpacket));
+    memcpy(pseudo_packet + sizeof(struct pseudoTCPpacket), tcph, sizeof(struct tcphdr) + strlen(data));
     
-    tcph->th_sum = tcp_csum((unsigned short *)pseudo_packet, (int) (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data)));
     
-    printf("TCP checksum: %d\n", tcph->th_sum);
+    tcph->check = tcp_csum((unsigned short *)pseudo_packet, (int) (sizeof(struct pseudoTCPpacket) + sizeof(struct tcphdr) + strlen(data)));
+    
+    printf("TCP checksum: %d\n", tcph->check);
     
     int bytes;
-    if((bytes = sendto(sock_tcp, buffer, iph->ip_len, 0, (struct sockaddr *)&sin, sizeof(sin))) < 0){
-         printf("Error in sendto\n");
+    if((bytes = sendto(sock_tcp, buffer, iph->tot_len, 0, (struct sockaddr *)&sin, sizeof(sin))) < 0){
+         perror("send to error: ");
+         exit(-1);
     }
     else printf("sendto OK: %d bytes\n", bytes);
 
